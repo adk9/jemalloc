@@ -17,6 +17,11 @@ typedef struct tcaches_s tcaches_t;
 #define	TCACHE_STATE_MAX		TCACHE_STATE_PURGATORY
 
 /*
+ * Absolute minimum number of cache slots for each small bin.
+ */
+#define	TCACHE_NSLOTS_SMALL_MIN		20
+
+/*
  * Absolute maximum number of cache slots for each small bin in the thread
  * cache.  This is an additional constraint beyond that imposed as: twice the
  * number of regions per run for this size class.
@@ -120,10 +125,10 @@ extern tcaches_t	*tcaches;
 
 size_t	tcache_salloc(const void *ptr);
 void	tcache_event_hard(tsd_t *tsd, tcache_t *tcache);
-void	*tcache_alloc_small_hard(tsd_t *tsd, tcache_t *tcache,
+void	*tcache_alloc_small_hard(tsd_t *tsd, arena_t *arena, tcache_t *tcache,
     tcache_bin_t *tbin, index_t binind);
-void	tcache_bin_flush_small(tsd_t *tsd, tcache_bin_t *tbin, index_t binind,
-    unsigned rem, tcache_t *tcache);
+void	tcache_bin_flush_small(tsd_t *tsd, tcache_t *tcache, tcache_bin_t *tbin,
+    index_t binind, unsigned rem);
 void	tcache_bin_flush_large(tsd_t *tsd, tcache_bin_t *tbin, index_t binind,
     unsigned rem, tcache_t *tcache);
 void	tcache_arena_associate(tcache_t *tcache, arena_t *arena);
@@ -151,10 +156,10 @@ bool	tcache_enabled_get(void);
 tcache_t *tcache_get(tsd_t *tsd, bool create);
 void	tcache_enabled_set(bool enabled);
 void	*tcache_alloc_easy(tcache_bin_t *tbin);
-void	*tcache_alloc_small(tsd_t *tsd, tcache_t *tcache, size_t size,
-    bool zero);
-void	*tcache_alloc_large(tsd_t *tsd, tcache_t *tcache, size_t size,
-    bool zero);
+void	*tcache_alloc_small(tsd_t *tsd, arena_t *arena, tcache_t *tcache,
+    size_t size, bool zero);
+void	*tcache_alloc_large(tsd_t *tsd, arena_t *arena, tcache_t *tcache,
+    size_t size, bool zero);
 void	tcache_dalloc_small(tsd_t *tsd, tcache_t *tcache, void *ptr,
     index_t binind);
 void	tcache_dalloc_large(tsd_t *tsd, tcache_t *tcache, void *ptr,
@@ -258,7 +263,8 @@ tcache_alloc_easy(tcache_bin_t *tbin)
 }
 
 JEMALLOC_ALWAYS_INLINE void *
-tcache_alloc_small(tsd_t *tsd, tcache_t *tcache, size_t size, bool zero)
+tcache_alloc_small(tsd_t *tsd, arena_t *arena, tcache_t *tcache, size_t size,
+    bool zero)
 {
 	void *ret;
 	index_t binind;
@@ -271,7 +277,7 @@ tcache_alloc_small(tsd_t *tsd, tcache_t *tcache, size_t size, bool zero)
 	usize = index2size(binind);
 	ret = tcache_alloc_easy(tbin);
 	if (unlikely(ret == NULL)) {
-		ret = tcache_alloc_small_hard(tsd, tcache, tbin, binind);
+		ret = tcache_alloc_small_hard(tsd, arena, tcache, tbin, binind);
 		if (ret == NULL)
 			return (NULL);
 	}
@@ -302,7 +308,8 @@ tcache_alloc_small(tsd_t *tsd, tcache_t *tcache, size_t size, bool zero)
 }
 
 JEMALLOC_ALWAYS_INLINE void *
-tcache_alloc_large(tsd_t *tsd, tcache_t *tcache, size_t size, bool zero)
+tcache_alloc_large(tsd_t *tsd, arena_t *arena, tcache_t *tcache, size_t size,
+    bool zero)
 {
 	void *ret;
 	index_t binind;
@@ -320,7 +327,7 @@ tcache_alloc_large(tsd_t *tsd, tcache_t *tcache, size_t size, bool zero)
 		 * Only allocate one large object at a time, because it's quite
 		 * expensive to create one and not use it.
 		 */
-		ret = arena_malloc_large(arena_choose(tsd, NULL), usize, zero);
+		ret = arena_malloc_large(arena, usize, zero);
 		if (ret == NULL)
 			return (NULL);
 	} else {
@@ -366,8 +373,8 @@ tcache_dalloc_small(tsd_t *tsd, tcache_t *tcache, void *ptr, index_t binind)
 	tbin = &tcache->tbins[binind];
 	tbin_info = &tcache_bin_info[binind];
 	if (unlikely(tbin->ncached == tbin_info->ncached_max)) {
-		tcache_bin_flush_small(tsd, tbin, binind,
-		    (tbin_info->ncached_max >> 1), tcache);
+		tcache_bin_flush_small(tsd, tcache, tbin, binind,
+		    (tbin_info->ncached_max >> 1));
 	}
 	assert(tbin->ncached < tbin_info->ncached_max);
 	tbin->avail[tbin->ncached] = ptr;

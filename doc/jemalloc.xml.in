@@ -571,8 +571,8 @@ for (i = 0; i < nbins; i++) {
     both large or both huge.  In such cases shrinkage always succeeds, but
     growth only succeeds if the trailing memory is currently available.</para>
 
-    <para>Assuming 4 MiB chunks, 4 KiB pages, and a 16-byte quantum on a 64-bit
-    system, the size classes in each category are as shown in <xref
+    <para>Assuming 256 KiB chunks, 4 KiB pages, and a 16-byte quantum on a
+    64-bit system, the size classes in each category are as shown in <xref
     linkend="size_classes" xrefstyle="template:Table %n"/>.</para>
 
     <table xml:id="size_classes" frame="all">
@@ -627,7 +627,7 @@ for (i = 0; i < nbins; i++) {
           <entry>[10 KiB, 12 KiB, 14 KiB]</entry>
         </row>
         <row>
-          <entry morerows="8">Large</entry>
+          <entry morerows="4">Large</entry>
           <entry>2 KiB</entry>
           <entry>[16 KiB]</entry>
         </row>
@@ -645,7 +645,12 @@ for (i = 0; i < nbins; i++) {
         </row>
         <row>
           <entry>32 KiB</entry>
-          <entry>[160 KiB, 192 KiB, 224 KiB, 256 KiB]</entry>
+          <entry>[160 KiB, 192 KiB, 224 KiB]</entry>
+        </row>
+        <row>
+          <entry morerows="9">Huge</entry>
+          <entry>32 KiB</entry>
+          <entry>[256 KiB]</entry>
         </row>
         <row>
           <entry>64 KiB</entry>
@@ -653,20 +658,15 @@ for (i = 0; i < nbins; i++) {
         </row>
         <row>
           <entry>128 KiB</entry>
-          <entry>[640 KiB, 768 KiB, 896 KiB, 1024 KiB]</entry>
+          <entry>[640 KiB, 768 KiB, 896 KiB, 1 MiB]</entry>
         </row>
         <row>
           <entry>256 KiB</entry>
-          <entry>[1280 KiB, 1536 KiB, 1792 KiB, 2048 KiB]</entry>
+          <entry>[1280 KiB, 1536 KiB, 1792 KiB, 2 MiB]</entry>
         </row>
         <row>
           <entry>512 KiB</entry>
-          <entry>[2560 KiB, 3072 KiB, 3584 KiB]</entry>
-        </row>
-        <row>
-          <entry morerows="5">Huge</entry>
-          <entry>512 KiB</entry>
-          <entry>[4 MiB]</entry>
+          <entry>[2560 KiB, 3 MiB, 3584 KiB, 4 MiB]</entry>
         </row>
         <row>
           <entry>1 MiB</entry>
@@ -729,6 +729,16 @@ for (i = 0; i < nbins; i++) {
         the <function>mallctl*<parameter/></function> functions report values,
         and increment the epoch.  Return the current epoch.  This is useful for
         detecting whether another thread caused a refresh.</para></listitem>
+      </varlistentry>
+
+      <varlistentry id="config.cache_oblivious">
+        <term>
+          <mallctl>config.cache_oblivious</mallctl>
+          (<type>bool</type>)
+          <literal>r-</literal>
+        </term>
+        <listitem><para><option>--enable-cache-oblivious</option> was specified
+        during build configuration.</para></listitem>
       </varlistentry>
 
       <varlistentry id="config.debug">
@@ -907,7 +917,7 @@ for (i = 0; i < nbins; i++) {
         <listitem><para>Virtual memory chunk size (log base 2).  If a chunk
         size outside the supported size range is specified, the size is
         silently clipped to the minimum/maximum supported size.  The default
-        chunk size is 4 MiB (2^22).
+        chunk size is 2 MiB (2^21).
         </para></listitem>
       </varlistentry>
 
@@ -937,7 +947,11 @@ for (i = 0; i < nbins; i++) {
         provides the kernel with sufficient information to recycle dirty pages
         if physical memory becomes scarce and the pages remain unused.  The
         default minimum ratio is 8:1 (2^3:1); an option value of -1 will
-        disable dirty page purging.</para></listitem>
+        disable dirty page purging.  See <link
+        linkend="arenas.lg_dirty_mult"><mallctl>arenas.lg_dirty_mult</mallctl></link>
+        and <link
+        linkend="arena.i.lg_dirty_mult"><mallctl>arena.&lt;i&gt;.lg_dirty_mult</mallctl></link>
+        for related dynamic control options.</para></listitem>
       </varlistentry>
 
       <varlistentry id="opt.stats_print">
@@ -1128,8 +1142,9 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         option for information on high-water-triggered profile dumping, and the
         <link linkend="opt.prof_final"><mallctl>opt.prof_final</mallctl></link>
         option for final profile dumping.  Profile output is compatible with
-        the included <command>pprof</command> Perl script, which originates
-        from the <ulink url="http://code.google.com/p/gperftools/">gperftools
+        the <command>jeprof</command> command, which is based on the
+        <command>pprof</command> that is developed as part of the <ulink
+        url="http://code.google.com/p/gperftools/">gperftools
         package</ulink>.</para></listitem>
       </varlistentry>
 
@@ -1151,7 +1166,7 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         <term>
           <mallctl>opt.prof_active</mallctl>
           (<type>bool</type>)
-          <literal>rw</literal>
+          <literal>r-</literal>
           [<option>--enable-prof</option>]
         </term>
         <listitem><para>Profiling activated/deactivated.  This is a secondary
@@ -1489,6 +1504,20 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         settings.</para></listitem>
       </varlistentry>
 
+      <varlistentry id="arena.i.lg_dirty_mult">
+        <term>
+          <mallctl>arena.&lt;i&gt;.lg_dirty_mult</mallctl>
+          (<type>ssize_t</type>)
+          <literal>rw</literal>
+        </term>
+        <listitem><para>Current per-arena minimum ratio (log base 2) of active
+        to dirty pages for arena &lt;i&gt;.  Each time this interface is set and
+        the ratio is increased, pages are synchronously purged as necessary to
+        impose the new ratio.  See <link
+        linkend="opt.lg_dirty_mult"><mallctl>opt.lg_dirty_mult</mallctl></link>
+        for additional information.</para></listitem>
+      </varlistentry>
+
       <varlistentry id="arena.i.chunk.alloc">
         <term>
           <mallctl>arena.&lt;i&gt;.chunk.alloc</mallctl>
@@ -1544,12 +1573,12 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         allocation for arenas created via <link
         linkend="arenas.extend"><mallctl>arenas.extend</mallctl></link> such
         that all chunks originate from an application-supplied chunk allocator
-        (by setting custom chunk allocation/deallocation functions just after
-        arena creation), but the automatically created arenas may have already
-        created chunks prior to the application having an opportunity to take
-        over chunk allocation.
+        (by setting custom chunk allocation/deallocation/purge functions just
+        after arena creation), but the automatically created arenas may have
+        already created chunks prior to the application having an opportunity to
+        take over chunk allocation.
         <funcsynopsis><funcprototype>
-          <funcdef>typedef void <function>(chunk_dalloc_t)</function></funcdef>
+          <funcdef>typedef bool <function>(chunk_dalloc_t)</function></funcdef>
           <paramdef>void *<parameter>chunk</parameter></paramdef>
           <paramdef>size_t <parameter>size</parameter></paramdef>
           <paramdef>unsigned <parameter>arena_ind</parameter></paramdef>
@@ -1557,7 +1586,47 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         A chunk deallocation function conforms to the
         <type>chunk_dalloc_t</type> type and deallocates a
         <parameter>chunk</parameter> of given <parameter>size</parameter> on
-        behalf of arena <parameter>arena_ind</parameter>.</para></listitem>
+        behalf of arena <parameter>arena_ind</parameter>, returning false upon
+        success.</para></listitem>
+      </varlistentry>
+
+      <varlistentry id="arena.i.chunk.purge">
+        <term>
+          <mallctl>arena.&lt;i&gt;.chunk.purge</mallctl>
+          (<type>chunk_purge_t *</type>)
+          <literal>rw</literal>
+        </term>
+        <listitem><para>Get or set the chunk purge function for arena &lt;i&gt;.
+        A chunk purge function optionally discards physical pages associated
+        with pages in the chunk's virtual memory range but leaves the virtual
+        memory mapping intact, and indicates via its return value whether pages
+        in the virtual memory range will be zero-filled the next time they are
+        accessed.  If setting, the chunk purge function must be capable of
+        purging all extant chunks associated with arena &lt;i&gt;, usually by
+        passing unknown chunks to the purge function that was replaced.  In
+        practice, it is feasible to control allocation for arenas created via
+        <link linkend="arenas.extend"><mallctl>arenas.extend</mallctl></link>
+        such that all chunks originate from an application-supplied chunk
+        allocator (by setting custom chunk allocation/deallocation/purge
+        functions just after arena creation), but the automatically created
+        arenas may have already created chunks prior to the application having
+        an opportunity to take over chunk allocation.
+        <funcsynopsis><funcprototype>
+          <funcdef>typedef bool <function>(chunk_purge_t)</function></funcdef>
+          <paramdef>void *<parameter>chunk</parameter></paramdef>
+          <paramdef>size_t <parameter>offset</parameter></paramdef>
+          <paramdef>size_t <parameter>length</parameter></paramdef>
+          <paramdef>unsigned <parameter>arena_ind</parameter></paramdef>
+        </funcprototype></funcsynopsis>
+        A chunk purge function conforms to the <type>chunk_purge_t</type> type
+        and purges pages within <parameter>chunk</parameter> at
+        <parameter>offset</parameter> bytes, extending for
+        <parameter>length</parameter> on behalf of arena
+        <parameter>arena_ind</parameter>, returning false if pages within the
+        purged virtual memory range will be zero-filled the next time they are
+        accessed.  Note that the memory range being purged may span multiple
+        contiguous chunks, e.g. when purging memory that backed a huge
+        allocation.</para></listitem>
       </varlistentry>
 
       <varlistentry id="arenas.narenas">
@@ -1579,6 +1648,20 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         linkend="arenas.narenas"><mallctl>arenas.narenas</mallctl></link>
         booleans.  Each boolean indicates whether the corresponding arena is
         initialized.</para></listitem>
+      </varlistentry>
+
+      <varlistentry id="arenas.lg_dirty_mult">
+        <term>
+          <mallctl>arenas.lg_dirty_mult</mallctl>
+          (<type>ssize_t</type>)
+          <literal>rw</literal>
+        </term>
+        <listitem><para>Current default per-arena minimum ratio (log base 2) of
+        active to dirty pages, used to initialize <link
+        linkend="arena.i.lg_dirty_mult"><mallctl>arena.&lt;i&gt;.lg_dirty_mult</mallctl></link>
+        during arena creation.  See <link
+        linkend="opt.lg_dirty_mult"><mallctl>opt.lg_dirty_mult</mallctl></link>
+        for additional information.</para></listitem>
       </varlistentry>
 
       <varlistentry id="arenas.quantum">
@@ -1684,9 +1767,9 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         <listitem><para>Total number of huge size classes.</para></listitem>
       </varlistentry>
 
-      <varlistentry id="arenas.hchunks.i.size">
+      <varlistentry id="arenas.hchunk.i.size">
         <term>
-          <mallctl>arenas.hchunks.&lt;i&gt;.size</mallctl>
+          <mallctl>arenas.hchunk.&lt;i&gt;.size</mallctl>
           (<type>size_t</type>)
           <literal>r-</literal>
         </term>
@@ -1847,7 +1930,7 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         equal to <link
         linkend="stats.allocated"><mallctl>stats.allocated</mallctl></link>.
         This does not include <link linkend="stats.arenas.i.pdirty">
-        <mallctl>stats.arenas.&lt;i&gt;.pdirty</mallctl></link> and pages
+        <mallctl>stats.arenas.&lt;i&gt;.pdirty</mallctl></link>, nor pages
         entirely devoted to allocator metadata.</para></listitem>
       </varlistentry>
 
@@ -1866,6 +1949,23 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         linkend="stats.arenas.i.metadata.allocated"><mallctl>stats.arenas.&lt;i&gt;.metadata.allocated</mallctl></link>).</para></listitem>
       </varlistentry>
 
+      <varlistentry id="stats.resident">
+        <term>
+          <mallctl>stats.resident</mallctl>
+          (<type>size_t</type>)
+          <literal>r-</literal>
+          [<option>--enable-stats</option>]
+        </term>
+        <listitem><para>Maximum number of bytes in physically resident data
+        pages mapped by the allocator, comprising all pages dedicated to
+        allocator metadata, pages backing active allocations, and unused dirty
+        pages.  This is a maximum rather than precise because pages may not
+        actually be physically resident if they correspond to demand-zeroed
+        virtual memory that has not yet been touched.  This is a multiple of the
+        page size, and is larger than <link
+        linkend="stats.active"><mallctl>stats.active</mallctl></link>.</para></listitem>
+      </varlistentry>
+
       <varlistentry id="stats.mapped">
         <term>
           <mallctl>stats.mapped</mallctl>
@@ -1873,44 +1973,13 @@ malloc_conf = "xmalloc:true";]]></programlisting>
           <literal>r-</literal>
           [<option>--enable-stats</option>]
         </term>
-        <listitem><para>Total number of bytes in chunks mapped on behalf of the
-        application.  This is a multiple of the chunk size, and is at least as
-        large as <link
-        linkend="stats.active"><mallctl>stats.active</mallctl></link>.  This
-        does not include inactive chunks.</para></listitem>
-      </varlistentry>
-
-      <varlistentry id="stats.chunks.current">
-        <term>
-          <mallctl>stats.chunks.current</mallctl>
-          (<type>size_t</type>)
-          <literal>r-</literal>
-          [<option>--enable-stats</option>]
-        </term>
-        <listitem><para>Total number of chunks actively mapped on behalf of the
-        application.  This does not include inactive chunks.
-        </para></listitem>
-      </varlistentry>
-
-      <varlistentry id="stats.chunks.total">
-        <term>
-          <mallctl>stats.chunks.total</mallctl>
-          (<type>uint64_t</type>)
-          <literal>r-</literal>
-          [<option>--enable-stats</option>]
-        </term>
-        <listitem><para>Cumulative number of chunks allocated.</para></listitem>
-      </varlistentry>
-
-      <varlistentry id="stats.chunks.high">
-        <term>
-          <mallctl>stats.chunks.high</mallctl>
-          (<type>size_t</type>)
-          <literal>r-</literal>
-          [<option>--enable-stats</option>]
-        </term>
-        <listitem><para>Maximum number of active chunks at any time thus far.
-        </para></listitem>
+        <listitem><para>Total number of bytes in active chunks mapped by the
+        allocator.  This is a multiple of the chunk size, and is larger than
+        <link linkend="stats.active"><mallctl>stats.active</mallctl></link>.
+        This does not include inactive chunks, even those that contain unused
+        dirty pages, which means that there is no strict ordering between this
+        and <link
+        linkend="stats.resident"><mallctl>stats.resident</mallctl></link>.</para></listitem>
       </varlistentry>
 
       <varlistentry id="stats.arenas.i.dss">
@@ -1925,6 +1994,18 @@ malloc_conf = "xmalloc:true";]]></programlisting>
         <manvolnum>2</manvolnum></citerefentry> allocation.  See <link
         linkend="opt.dss"><mallctl>opt.dss</mallctl></link> for details.
         </para></listitem>
+      </varlistentry>
+
+      <varlistentry id="stats.arenas.i.lg_dirty_mult">
+        <term>
+          <mallctl>stats.arenas.&lt;i&gt;.lg_dirty_mult</mallctl>
+          (<type>ssize_t</type>)
+          <literal>r-</literal>
+        </term>
+        <listitem><para>Minimum ratio (log base 2) of active to dirty pages.
+        See <link
+        linkend="opt.lg_dirty_mult"><mallctl>opt.lg_dirty_mult</mallctl></link>
+        for details.</para></listitem>
       </varlistentry>
 
       <varlistentry id="stats.arenas.i.nthreads">
